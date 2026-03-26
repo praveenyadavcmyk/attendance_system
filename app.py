@@ -8,55 +8,34 @@ app = Flask(__name__)
 app.secret_key = "secret123"
 
 # ---------------- DATABASE ----------------
+
 def get_db():
-    return sqlite3.connect("database.db")
-
-def init_db():
-    db = get_db()
-
-    db.execute('''CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-        email TEXT,
-        password TEXT,
-        salary_per_day INTEGER
-    )''')
-
-    db.execute('''CREATE TABLE IF NOT EXISTS attendance (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        date TEXT,
-        status TEXT
-    )''')
-
-    # default user
-    db.execute("INSERT OR IGNORE INTO users VALUES (1,'Employee','emp@mail.com','123',500)")
-
-    db.commit()
-
-init_db()
+    conn = sqlite3.connect("database.db")
+    conn.row_factory = sqlite3.Row
+    return conn
 
 # ---------------- DISTANCE FUNCTION ----------------
+
 def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371  # km
+    R = 6371000  # meters
 
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
 
-    a = (math.sin(dlat/2)**2 +
-         math.cos(math.radians(lat1)) *
-         math.cos(math.radians(lat2)) *
-         math.sin(dlon/2)**2)
-
+    a = math.sin(delta_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda/2)**2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
-    return R * c * 1000  # meters
+    return R * c
 
+# ---------------- HOME ----------------
 
-# ---------------- LOGIN ----------------
 @app.route('/')
 def home():
     return render_template("login.html")
+
+# ---------------- LOGIN ----------------
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -64,16 +43,17 @@ def login():
     password = request.form['password']
 
     db = get_db()
-    user = db.execute("SELECT * FROM users WHERE email=? AND password=?", (email, password)).fetchone()
+    user = db.execute("SELECT * FROM users WHERE email=? AND password=?",
+                      (email, password)).fetchone()
 
     if user:
-        session['user_id'] = user[0]
+        session['user_id'] = user['id']
         return redirect('/employee')
-
-    return "Invalid Login"
-
+    else:
+        return "Invalid login"
 
 # ---------------- SIGNUP ----------------
+
 @app.route('/signup')
 def signup():
     return render_template("signup.html")
@@ -86,41 +66,39 @@ def register():
     salary = request.form['salary']
 
     db = get_db()
-    db.execute("INSERT INTO users (name, email, password, salary_per_day) VALUES (?, ?, ?, ?)",
-               (name, email, password, salary))
+    db.execute(
+        "INSERT INTO users (name, email, password, salary_per_day) VALUES (?, ?, ?, ?)",
+        (name, email, password, salary)
+    )
     db.commit()
 
     return redirect('/')
 
+# ---------------- EMPLOYEE DASHBOARD ----------------
 
-# ---------------- EMPLOYEE ----------------
 @app.route('/employee')
 def employee():
     if 'user_id' not in session:
         return redirect('/')
 
-    from datetime import datetime
-
     user_id = session['user_id']
     db = get_db()
 
-    # Current month (format: 2026-03)
     current_month = datetime.now().strftime('%Y-%m')
 
-    # Count present days for current month
     present_days = db.execute("""
-        SELECT COUNT(*) FROM attendance 
-        WHERE user_id = ? 
+        SELECT COUNT(*) FROM attendance
+        WHERE user_id = ?
         AND status = 'Present'
         AND date LIKE ?
     """, (user_id, current_month + '%')).fetchone()[0]
 
-    # Get user salary
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+
+    if not user:
+        return "User not found"
 
     total_salary = present_days * user['salary_per_day']
-
-    # Month name (March 2026)
     month_name = datetime.now().strftime('%B %Y')
 
     return render_template(
@@ -129,46 +107,91 @@ def employee():
         total_salary=total_salary,
         month_name=month_name
     )
-# ---------------- MARK ATTENDANCE (GPS) ----------------
+
+# ---------------- MARK ATTENDANCE ----------------
+
 @app.route('/mark_location', methods=['POST'])
 def mark_location():
-    user_id = session['user_id']
-    data = request.get_json()
+    if 'user_id' not in session:
+        return "Not logged in"
 
+    data = request.get_json()
     user_lat = data['lat']
     user_lon = data['lon']
 
-    # 🔴 SET YOUR LOCATION HERE
+    # 🔴 SET YOUR OFFICE LOCATION HERE
     office_lat = 28.36928653724523
     office_lon = 77.5507754219189
 
-    dist = calculate_distance(user_lat, user_lon, office_lat, office_lon)
+    distance = calculate_distance(user_lat, user_lon, office_lat, office_lon)
 
-    if dist > 1000:
+    if distance > 100:
         return "❌ You are not in office location"
 
-    today = datetime.now().strftime('%Y-%m-%d')
     db = get_db()
 
-    existing = db.execute("SELECT * FROM attendance WHERE user_id=? AND date=?", (user_id, today)).fetchone()
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    # check already marked
+    existing = db.execute("""
+        SELECT * FROM attendance
+        WHERE user_id=? AND date=?
+    """, (session['user_id'], today)).fetchone()
 
     if existing:
-        return "⚠️ Already marked today"
+        return "⚠ Already marked"
 
-    db.execute("INSERT INTO attendance (user_id, date, status) VALUES (?, ?, 'approved')",
-               (user_id, today))
+    db.execute("""
+        INSERT INTO attendance (user_id, date, status)
+        VALUES (?, ?, 'Present')
+    """, (session['user_id'], today))
+
     db.commit()
 
-    return "✅ Attendance Marked Successfully"
+    return "✅ Attendance marked"
 
+# ---------------- HISTORY ----------------
+
+@app.route('/history')
+def history():
+    if 'user_id' not in session:
+        return redirect('/')
+
+    db = get_db()
+
+    records = db.execute("""
+        SELECT * FROM attendance
+        WHERE user_id=?
+        ORDER BY date DESC
+    """, (session['user_id'],)).fetchall()
+
+    return render_template("history.html", records=records)
+
+# ---------------- ADMIN ----------------
+
+@app.route('/admin')
+def admin():
+    db = get_db()
+
+    users = db.execute("SELECT * FROM users").fetchall()
+
+    attendance = db.execute("""
+        SELECT attendance.*, users.name
+        FROM attendance
+        JOIN users ON attendance.user_id = users.id
+        ORDER BY date DESC
+    """).fetchall()
+
+    return render_template("admin.html", users=users, attendance=attendance)
 
 # ---------------- LOGOUT ----------------
+
 @app.route('/logout')
 def logout():
     session.clear()
     return redirect('/')
 
-
 # ---------------- RUN ----------------
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5002)), debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
