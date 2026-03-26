@@ -99,28 +99,36 @@ def employee():
     if 'user_id' not in session:
         return redirect('/')
 
+    from datetime import datetime
+
     user_id = session['user_id']
     db = get_db()
 
-    month = datetime.now().strftime('%Y-%m')
+    # Current month (format: 2026-03)
+    current_month = datetime.now().strftime('%Y-%m')
 
-    data = db.execute("""
-        SELECT date, status FROM attendance
-        WHERE user_id=? AND date LIKE ?
-    """, (user_id, f"{month}%")).fetchall()
+    # Count present days for current month
+    present_days = db.execute("""
+        SELECT COUNT(*) FROM attendance 
+        WHERE user_id = ? 
+        AND status = 'Present'
+        AND date LIKE ?
+    """, (user_id, current_month + '%')).fetchone()[0]
 
-    total_days = db.execute("""
-        SELECT COUNT(*) FROM attendance
-        WHERE user_id=? AND status='approved' AND date LIKE ?
-    """, (user_id, f"{month}%")).fetchone()[0]
+    # Get user salary
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
-    salary = db.execute("SELECT salary_per_day FROM users WHERE id=?", (user_id,)).fetchone()[0]
+    total_salary = present_days * user['salary_per_day']
 
-    total_salary = total_days * salary
+    # Month name (March 2026)
+    month_name = datetime.now().strftime('%B %Y')
 
-    return render_template("employee.html", data=data, days=total_days, salary=total_salary)
-
-
+    return render_template(
+        "employee.html",
+        present_days=present_days,
+        total_salary=total_salary,
+        month_name=month_name
+    )
 # ---------------- MARK ATTENDANCE (GPS) ----------------
 @app.route('/mark_location', methods=['POST'])
 def mark_location():

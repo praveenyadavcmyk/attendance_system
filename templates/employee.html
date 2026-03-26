@@ -1,131 +1,65 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Employee Dashboard</title>
-
-    <!-- Bootstrap -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-
-    <!-- Leaflet Map -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-
-    <style>
-        body {
-            background: #f5f7fa;
-        }
-        .card {
-            border-radius: 15px;
-            box-shadow: 0px 4px 10px rgba(0,0,0,0.1);
-        }
-        #map {
-            height: 300px;
-            border-radius: 10px;
-        }
-    </style>
+    <title>Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
 
-<body>
+<body class="bg-gray-100">
 
-<div class="container mt-4">
+<div class="max-w-5xl mx-auto mt-10">
 
     <!-- Header -->
-    <div class="d-flex justify-content-between mb-3">
-        <h2>📊 Employee Dashboard</h2>
-        <a href="/logout" class="btn btn-danger">Logout</a>
-    </div>
+    <h1 class="text-3xl font-bold mb-5">Employee Dashboard</h1>
+    <h2 class="text-lg text-gray-600 mb-8">{{ month_name }}</h2>
 
-    <!-- Summary Cards -->
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <div class="card p-3 text-center">
-                <h4>Present Days</h4>
-                <h2>{{ days }}</h2>
-            </div>
+    <!-- Cards -->
+    <div class="grid grid-cols-2 gap-6">
+
+        <div class="bg-white p-6 rounded-2xl shadow">
+            <h3 class="text-gray-500">This Month Present Days</h3>
+            <p class="text-2xl font-bold">{{ present_days }}</p>
         </div>
 
-        <div class="col-md-6">
-            <div class="card p-3 text-center">
-                <h4>Total Salary</h4>
-                <h2>₹{{ salary }}</h2>
-            </div>
+        <div class="bg-white p-6 rounded-2xl shadow">
+            <h3 class="text-gray-500">This Month Salary</h3>
+            <p class="text-2xl font-bold">₹{{ total_salary }}</p>
         </div>
+
     </div>
 
-    <!-- Attendance Button -->
-    <div class="text-center mb-4">
-        <button class="btn btn-primary btn-lg" onclick="markAttendance()">
+    <!-- Buttons -->
+    <div class="mt-8 flex gap-4">
+
+        <button onclick="markAttendance()"
+            class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600">
             📍 Mark Attendance
         </button>
-    </div>
 
-    <!-- Map -->
-    <div class="card p-3 mb-4">
-        <h5>📍 Your Location</h5>
-        <div id="map"></div>
-    </div>
+        <a href="/history">
+            <button class="bg-green-500 text-white px-6 py-2 rounded-lg hover:bg-green-600">
+                📊 My History
+            </button>
+        </a>
 
-    <!-- Attendance Table -->
-    <div class="card p-3">
-        <h5>📅 Monthly Attendance</h5>
-        <table class="table table-bordered mt-3">
-            <tr>
-                <th>Date</th>
-                <th>Status</th>
-            </tr>
+        <a href="/admin">
+            <button class="bg-gray-800 text-white px-6 py-2 rounded-lg hover:bg-gray-900">
+                🛠 Admin
+            </button>
+        </a>
 
-            {% for row in data %}
-            <tr>
-                <td>{{ row[0] }}</td>
-                <td>{{ row[1] }}</td>
-            </tr>
-            {% endfor %}
-        </table>
     </div>
 
 </div>
 
-<!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
 <script>
-let map;
-
-function initMap(lat, lon) {
-    map = L.map('map').setView([lat, lon], 15);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: 'Map data © OpenStreetMap'
-    }).addTo(map);
-
-    // User marker
-    L.marker([lat, lon]).addTo(map)
-        .bindPopup("You are here")
-        .openPopup();
-
-    // Office location (same as backend)
-    const officeLat = 28.36928653724523;
-    const officeLon = 77.5507754219189;
-
-    L.marker([officeLat, officeLon]).addTo(map)
-        .bindPopup("Office Location");
-
-    // Radius circle
-    L.circle([officeLat, officeLon], {
-        radius: 100,
-        color: 'green'
-    }).addTo(map);
-}
-
-// Get location on load
-navigator.geolocation.getCurrentPosition(function(position) {
-    initMap(position.coords.latitude, position.coords.longitude);
-});
-
 function markAttendance() {
     navigator.geolocation.getCurrentPosition(function(position) {
-        fetch("/mark_location", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
+        fetch('/mark_location', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
             body: JSON.stringify({
                 lat: position.coords.latitude,
                 lon: position.coords.longitude
