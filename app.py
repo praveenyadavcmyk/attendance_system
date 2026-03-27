@@ -1,8 +1,8 @@
 from flask import Flask, render_template, request, redirect, session
 import sqlite3
+import os
 from datetime import datetime
 import math
-import os
 
 app = Flask(__name__)
 app.secret_key = "secret123"
@@ -10,9 +10,40 @@ app.secret_key = "secret123"
 # ---------------- DATABASE ----------------
 
 def get_db():
-    conn = sqlite3.connect("database.db")
+    db_path = os.path.join(os.getcwd(), "database.db")
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def init_db():
+    db = get_db()
+    c = db.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        email TEXT,
+        password TEXT,
+        salary_per_day INTEGER
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS attendance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        date TEXT,
+        status TEXT
+    )
+    """)
+
+    db.commit()
+    db.close()
+
+# 🔥 IMPORTANT (RUN ALWAYS)
+init_db()
 
 # ---------------- DISTANCE FUNCTION ----------------
 
@@ -39,18 +70,24 @@ def home():
 
 @app.route('/login', methods=['POST'])
 def login():
-    email = request.form['email']
-    password = request.form['password']
+    try:
+        email = request.form.get('email')
+        password = request.form.get('password')
 
-    db = get_db()
-    user = db.execute("SELECT * FROM users WHERE email=? AND password=?",
-                      (email, password)).fetchone()
+        db = get_db()
+        user = db.execute(
+            "SELECT * FROM users WHERE email=? AND password=?",
+            (email, password)
+        ).fetchone()
 
-    if user:
-        session['user_id'] = user['id']
-        return redirect('/employee')
-    else:
-        return "Invalid login"
+        if user:
+            session['user_id'] = user['id']
+            return redirect('/employee')
+        else:
+            return "Invalid login"
+
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 # ---------------- SIGNUP ----------------
 
@@ -58,12 +95,13 @@ def login():
 def signup():
     return render_template("signup.html")
 
+
 @app.route('/register', methods=['POST'])
 def register():
-    name = request.form['name']
-    email = request.form['email']
-    password = request.form['password']
-    salary = request.form['salary']
+    name = request.form.get('name')
+    email = request.form.get('email')
+    password = request.form.get('password')
+    salary = request.form.get('salary')
 
     db = get_db()
     db.execute(
@@ -81,32 +119,36 @@ def employee():
     if 'user_id' not in session:
         return redirect('/')
 
-    user_id = session['user_id']
-    db = get_db()
+    try:
+        user_id = session['user_id']
+        db = get_db()
 
-    current_month = datetime.now().strftime('%Y-%m')
+        current_month = datetime.now().strftime('%Y-%m')
 
-    present_days = db.execute("""
-        SELECT COUNT(*) FROM attendance
-        WHERE user_id = ?
-        AND status = 'Present'
-        AND date LIKE ?
-    """, (user_id, current_month + '%')).fetchone()[0]
+        present_days = db.execute("""
+            SELECT COUNT(*) FROM attendance
+            WHERE user_id = ?
+            AND status = 'Present'
+            AND date LIKE ?
+        """, (user_id, current_month + '%')).fetchone()[0]
 
-    user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
 
-    if not user:
-        return "User not found"
+        if not user:
+            return "User not found"
 
-    total_salary = present_days * user['salary_per_day']
-    month_name = datetime.now().strftime('%B %Y')
+        total_salary = present_days * user['salary_per_day']
+        month_name = datetime.now().strftime('%B %Y')
 
-    return render_template(
-        "employee.html",
-        present_days=present_days,
-        total_salary=total_salary,
-        month_name=month_name
-    )
+        return render_template(
+            "employee.html",
+            present_days=present_days,
+            total_salary=total_salary,
+            month_name=month_name
+        )
+
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 # ---------------- MARK ATTENDANCE ----------------
 
@@ -115,40 +157,42 @@ def mark_location():
     if 'user_id' not in session:
         return "Not logged in"
 
-    data = request.get_json()
-    user_lat = data['lat']
-    user_lon = data['lon']
+    try:
+        data = request.get_json()
+        user_lat = data['lat']
+        user_lon = data['lon']
 
-    # 🔴 SET YOUR OFFICE LOCATION HERE
-    office_lat = 28.36928653724523
-    office_lon = 77.5507754219189
+        # 🔴 SET YOUR OFFICE LOCATION
+        office_lat = 28.36928653724523
+        office_lon = 77.5507754219189
 
-    distance = calculate_distance(user_lat, user_lon, office_lat, office_lon)
+        distance = calculate_distance(user_lat, user_lon, office_lat, office_lon)
 
-    if distance > 100:
-        return "❌ You are not in office location"
+        if distance > 100:
+            return "❌ You are not in office location"
 
-    db = get_db()
+        db = get_db()
+        today = datetime.now().strftime('%Y-%m-%d')
 
-    today = datetime.now().strftime('%Y-%m-%d')
+        existing = db.execute("""
+            SELECT * FROM attendance
+            WHERE user_id=? AND date=?
+        """, (session['user_id'], today)).fetchone()
 
-    # check already marked
-    existing = db.execute("""
-        SELECT * FROM attendance
-        WHERE user_id=? AND date=?
-    """, (session['user_id'], today)).fetchone()
+        if existing:
+            return "⚠ Already marked"
 
-    if existing:
-        return "⚠ Already marked"
+        db.execute("""
+            INSERT INTO attendance (user_id, date, status)
+            VALUES (?, ?, 'Present')
+        """, (session['user_id'], today))
 
-    db.execute("""
-        INSERT INTO attendance (user_id, date, status)
-        VALUES (?, ?, 'Present')
-    """, (session['user_id'], today))
+        db.commit()
 
-    db.commit()
+        return "✅ Attendance marked"
 
-    return "✅ Attendance marked"
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 # ---------------- HISTORY ----------------
 
@@ -194,6 +238,4 @@ def logout():
 # ---------------- RUN ----------------
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
-    print("test deploy")
-    
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
